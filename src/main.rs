@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use std::net::{TcpListener, TcpStream};
 use std::io::BufReader;
 use std::thread;
-use bytes::{BytesMut, BufMut};
+use bytes::BytesMut;
 use std::io::Error;
 
 static ADDR: &str = "127.0.0.1:8081";
@@ -69,3 +69,15 @@ fn main() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+pub mod tests {
+    
+    use super::*;
+
+    #[test]
+    pub fn test_kbits_to_kbytes() {
+	assert_eq!(kbits_to_kbytes(1), 125);
+    }
+}
+
