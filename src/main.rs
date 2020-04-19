@@ -8,10 +8,17 @@ use std::io::Error;
 
 static ADDR: &str = "127.0.0.1:8081";
 
+fn kbits_to_kbytes(kbits: usize) -> usize {
+    kbits * (1000 / 8)
+}
+
+// NOTE: download_rate is kbit/s.
 fn throttle(stream: TcpStream, download_rate: usize) -> Result<BytesMut, Error> {
     // Frame of reference is 1 second.
     let tf = Duration::new(1, 0);
     let zero = Duration::new(0, 0);
+
+    let n_bytes = kbits_to_kbytes(download_rate);
     
     // let mut buf = [0; 128][...];
     let mut reader = BufReader::new(stream);
@@ -27,7 +34,7 @@ fn throttle(stream: TcpStream, download_rate: usize) -> Result<BytesMut, Error> 
 
 	time_left -= start.elapsed();
 
-	let bytes_diff = download_rate - bytes_read;
+	let bytes_diff = n_bytes - bytes_read;
 	
 	// If there is time left before 1s and
 	// there are still bytes left to read, keep reading.
