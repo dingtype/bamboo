@@ -5,20 +5,23 @@ use std::io::BufReader;
 use std::thread;
 use bytes::BytesMut;
 use std::io::Error;
+use std::convert::TryInto;
 
 static ADDR: &str = "127.0.0.1:8081";
 
-fn kbits_to_kbytes(kbits: usize) -> usize {
+fn kbits_to_kbytes(kbits: u64) -> u64 {
     kbits * (1000 / 8)
 }
 
 // NOTE: download_rate is kbit/s.
-fn throttle(stream: TcpStream, download_rate: usize) -> Result<BytesMut, Error> {
+fn throttle(stream: TcpStream, download_rate: u64, latency_ms: u64) -> Result<BytesMut, Error> {
     // Frame of reference is 1 second.
     let tf = Duration::new(1, 0);
     let zero = Duration::new(0, 0);
+    let latency = Duration::from_millis(latency_ms);
 
-    let n_bytes = kbits_to_kbytes(download_rate);
+    let n_bytes: usize = kbits_to_kbytes(download_rate).try_into()
+	.expect("Fail to convert to usize");
     
     // let mut buf = [0; 128][...];
     let mut reader = BufReader::new(stream);
@@ -28,6 +31,8 @@ fn throttle(stream: TcpStream, download_rate: usize) -> Result<BytesMut, Error> 
     let start = Instant::now();
     
     while time_left > zero {
+	thread::sleep(latency);
+	
 	reader.read(&mut buf)?;
 
 	let bytes_read = buf.capacity();
