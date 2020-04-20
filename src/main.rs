@@ -1,88 +1,95 @@
-use std::io::prelude::*;
-use std::time::{Duration, Instant};
-use std::net::{TcpListener, TcpStream};
-use std::io::BufReader;
-use std::thread;
-use bytes::BytesMut;
-use std::io::Error;
+use bytes::{BufMut, BytesMut};
 use std::convert::TryInto;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::io::Error;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 static ADDR: &str = "127.0.0.1:8081";
 
-fn kbits_to_kbytes(kbits: u64) -> u64 {
-    kbits * (1000 / 8)
-}
-
-// NOTE: download_rate is kbit/s.
-fn throttle(stream: TcpStream, download_rate: u64, latency_ms: u64) -> Result<BytesMut, Error> {
-    // Frame of reference is 1 second.
-    let tf = Duration::new(1, 0);
+// NOTE: download_rate is kb/s.
+fn throttle(mut stream: TcpStream, download_rate: u64, latency_ms: u64) -> Result<BytesMut, Error> {
+    let second = Duration::new(1, 0);
     let zero = Duration::new(0, 0);
+
     let latency = Duration::from_millis(latency_ms);
 
-    let n_bytes: usize = kbits_to_kbytes(download_rate).try_into()
-	.expect("Fail to convert to usize");
-    
-    // let mut buf = [0; 128][...];
-    let mut reader = BufReader::new(stream);
-    let mut buf = BytesMut::with_capacity(1024);
+    // Convert kbits to bytes
+    let n_bytes = download_rate * 125;
 
-    let mut time_left = tf;
+    let ns_per_byte: u128 = (1000_000_000 / n_bytes).into();
+
+    let mut reader = BufReader::new(&stream);
+    let mut out = BytesMut::with_capacity(1024);
+    let mut buf = [0; 1];
+
     let start = Instant::now();
-    
-    while time_left > zero {
-	thread::sleep(latency);
-	
-	reader.read(&mut buf)?;
+    let mut bytes_read = 0;
+    let mut time_passed = zero;
 
-	let bytes_read = buf.capacity();
+    loop {
+        if time_passed >= second {
+            break;
+        }
 
-	time_left -= start.elapsed();
+        let init = Instant::now();
 
-	let bytes_diff = n_bytes - bytes_read;
-	
-	// If there is time left before 1s and
-	// there are still bytes left to read, keep reading.
-	if bytes_diff > 0 {
-	    continue
-	} else {
-	    // Should sleep and wait until next second.
-	    thread::sleep(time_left);
-	}
+        let len: u64 = reader.read(&mut buf)?.try_into().unwrap();
+
+        out.put(&buf[..]);
+
+        bytes_read += len;
+
+        time_passed += start.elapsed();
+
+        let a: u128 = init.saturating_duration_since(start).as_nanos();
+        let b: u128 = Instant::now().saturating_duration_since(start).as_nanos();
+
+        if (a + ns_per_byte) > b {
+            let d = Duration::from_nanos(((a + ns_per_byte) - b).try_into().unwrap());
+            println!("Stalling for {} seconds...", d.as_secs_f64());
+            thread::sleep(d);
+        }
     }
 
-    Ok(buf)
+    let end = time_passed;
+    println!("out {:#?}", out);
+    println!("taken {:#?}", end);
+    Ok(out)
 }
 
 fn handle_client(mut stream: TcpStream) {
     let mut buf = [0; 10];
     let len = stream.peek(&mut buf).expect("peek failed");
     println!("Length: {}", len);
-    
-    // stream.write(&[1])?;
-    stream.set_read_timeout(None).expect("set_readtimeout failed");
-    
+    stream
+        .set_read_timeout(None)
+        .expect("set_readtimeout failed");
     stream.read(&mut [0; 128]).expect("fail to read");
 }
-    
+
 fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(ADDR)?;
 
     for stream in listener.incoming() {
-	handle_client(stream?);
+        let result = throttle(stream?, 25000, 0)?;
+        println!("{:#?}", result);
     }
 
     Ok(())
 }
 
+/*
 #[cfg(test)]
 pub mod tests {
-    
+
     use super::*;
 
     #[test]
     pub fn test_kbits_to_kbytes() {
-	assert_eq!(kbits_to_kbytes(1), 125);
+    assert_eq!(kbits_to_kbytes(1), 125);
     }
 }
-
+*/
